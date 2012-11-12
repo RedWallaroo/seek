@@ -24,8 +24,7 @@ def search(args, ignore_case=False):
 
 def search_helper(arguments, search_location, ignore_case=False, print_filename=0, print_line=0):
     if search_location == [os.getcwd()]:
-        search_location = files_in_current_directory(search_location)
-
+        search_location = files_in_directory(search_location)
     if len(search_location) > 1: print_filename = 1
     for x in range (len(search_location)):
         args = arguments, search_location[x]
@@ -40,50 +39,55 @@ def search_helper(arguments, search_location, ignore_case=False, print_filename=
 
 # search options
 
-def basic_search((pattern, location), ignore_case=False):
-    search_helper(pattern, location, ignore_case, print_line=1)
+def searchfn(print_line=1, print_filename=0):
+    def wrap(fn):
+        def searcher((pattern,location), ignore_case=False):
+            search_helper(fn(pattern), location, ignore_case=ignore_case, print_line=print_line, print_filename=print_filename)
+        return searcher
+    return wrap
 
-def line_starts_with((pattern, location)):
-    search_arg = '^'+ pattern
-    search_helper(search_arg, location, print_line=1)
+@searchfn()
+def basic_search(pattern):
+    return pattern
 
-def starts_with((pattern, location)):
-    search_arg = '\\b'+ pattern + '\\B'
-    search_helper(search_arg, location, print_line=1)
+@searchfn()
+def line_starts_with(pattern):
+    return '^'+ pattern
 
-def ends_with((pattern, location)):
-    search_arg = '\\B' + pattern + '\\b'
-    search_helper(search_arg, location, print_line=1)
+@searchfn()
+def starts_with(pattern):
+    return '\\b'+ pattern + '\\B'
 
-def line_ends_with((pattern, location)):
-    search_arg = pattern + '$'
-    search_helper(search_arg, location, print_line=1)
+@searchfn()
+def ends_with(pattern):
+    return '\\B' + pattern + '\\b'
 
-def match_whole_word((pattern,location)):
-    search_arg = '\\b' + pattern + '\\b'
-    search_helper(search_arg, location, print_line=1)
+@searchfn()
+def line_ends_with(pattern):
+    return pattern + '$'
 
-def list_filenames((pattern, location)):
-    search_helper(pattern,location, print_filename=1)
+@searchfn()
+def match_whole_word(pattern):
+    return '\\b' + pattern + '\\b'
+
+@searchfn(print_line=0, print_filename=1)
+def list_filenames(pattern):
+    return pattern
 
 def pattern_file((pattern, location)):
-    search_terms = []
-    text_lines = read_lines_from_file(pattern)
-    for line in text_lines:
-        search_terms.append(line.strip('\n'))
-    arguments = '|'.join(search_terms)
+    arguments = '|'.join(line.strip('\n') for line in read_lines_from_file(pattern))
     search_helper(arguments,location, print_line=1)
 
 def recursive_dir((pattern, location)):
-
     if len(location) == 1:
-        files = files_in_recursive_directory(location)
-        search_helper(pattern,files, print_line=1)
+        search_dir = location[0]
+        extension = None
     elif len(location) > 1:
         # Assumes filename wildcard to use in recursive search
-        file_extension = find_file_extension(location)
-        files = files_in_recursive_directory([os.getcwd()], extension=file_extension)
-        search_helper(pattern,files, print_line=1)
+        search_dir = [os.getcwd()]
+        extension = find_file_extension(location)
+    files = files_in_directory(search_dir, extension=extension, recursive=True)
+    search_helper(pattern, files, print_line=1)
 
 def synonym_search((pattern, location)):
     synonyms = find_synonyms(pattern)
@@ -105,47 +109,43 @@ def find_file_extension(filenames):
     filename, extension = os.path.splitext(filenames[0])
     return extension
 
-def files_in_recursive_directory(directory_name, extension = None):
-    list_of_files = []
-    for dirs, subdirs, files in os.walk(directory_name[0]):
-        for i in files:
-            if extension == None or i.endswith(extension):
-                list_of_files.append(os.path.join(dirs,i))
-    return list_of_files
-
-def files_in_current_directory(directory_name, extension = None):
-    list_of_files = []
-    for item in os.listdir(directory_name[0]):
-            if extension == None or i.endswith(extension):
-                if os.path.isfile(os.path.join(directory_name[0], item)):
-                    list_of_files.append(os.path.join(directory_name[0],item))
-    return list_of_files
+def files_in_directory(directory_name, extension='', recursive=False):
+    if recursive:
+        list_of_files = (os.path.join(directory,f) for directory, subdirs, files in os.walk(directory_name[0]) for f in files)
+    else:
+        list_of_files = (os.path.join(directory_name[0], f) for f in os.listdir(directory_name[0]) if os.path.isfile(f))
+    return [f for f in list_of_files if not extension or f.endswith(extension)]
 
 def highlight(matchobj):
     return '\033[92m' + matchobj.group(0) + '\033[0m'
 
+def format_line_no(no):
+    return "\033[91m(Line {}) \033[0m".format(no)
 
-def print_results(results, search_terms, filename = None, print_filename = 0, print_line = 0):
+def format_filename(filename):
+    return "\033[94m{}\033[0m".format(filename)
 
-    for key,value in results.iteritems():
-            if print_filename == 1 and print_line == 1:
-                print '\n' + '\033[94m' + filename + '\033[0m' + '\033[91m' + " (Line " + str(key) + ")" + '\033[0m' + str(value).strip(' ')
-            elif print_filename == 1 and print_line == 0:
-                print '\n' + '\033[94m' + filename + '\033[0m' + '\033[91m' + " (Line " + str(key) + ")" + '\033[0m'
-            else:
-                print '\n' + '\033[91m' + "(Line " + str(key) + ")" + '\033[0m' + str(value).strip(' ')
+def format_line(line):
+    return str(line.strip(" "))
+
+def print_results(results, search_terms, filename=None, print_filename=0, print_line=0):
+    for line_no, line in results.iteritems():
+        output = '\n'
+        output += format_filename(filename) if print_filename else ""
+        output += format_line_no(line_no) if print_line else ""
+        output += format_line(line)
+        print output
 
 def read_lines_from_file(filename):
 
     try:
-        file = open(filename,'r')
-        lines = file.readlines()
-        return lines
+        with open(filename, 'r') as file:
+            return file.readlines()
     except IOError:
         current_directory = os.getcwd()
         try:
-            file = open(filename,'r')
-            lines = file.readlines()
-            return lines
+            with open(current_directory + filename, 'r') as file:
+                return file.readlines()
         except:
-            print("Error while opening file")
+            print "\033[91mError while opening file\033[0m"
+            raise e

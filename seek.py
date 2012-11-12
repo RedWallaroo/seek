@@ -3,6 +3,7 @@
 '''
 import os
 import sys
+import pdb
 
 import optparse
 
@@ -63,7 +64,6 @@ def main(args):
                       help="Searches for any files containing a match for the search_term and *any* of the synonym words returned from the dictionary API")
 
     (opts, args) = parser.parse_args(args)
-
     if len(args) < 1:
         parser.error("wrong number of arguments")
     elif len(args) == 1:
